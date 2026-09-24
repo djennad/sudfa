@@ -53,4 +53,13 @@ npm start
 | أي خادم آخر | `TURN_URL` (عدة روابط مفصولة بفاصلة) و `TURN_USERNAME` و `TURN_CREDENTIAL` |
 
 الخادم يطلب بيانات دخول مؤقتة من المزوّد ويرسلها للمتصفح، فلا يظهر مفتاح الـ API للزوار.
+
+## الظهور في Google
+
+| المتغير | الوظيفة |
+|---|---|
+| `SITE_URL` | عنوان الموقع العام (الافتراضي `https://sudfa.onrender.com`). غيّره عند ربط دومين خاص. |
+| `GOOGLE_SITE_VERIFICATION` | رمز التحقق من Google Search Console (يقبل الرمز وحده أو وسم `<meta>` كاملاً). |
+
+الخادم يولّد `robots.txt` و `sitemap.xml` تلقائياً من `SITE_URL`. أرسل `sitemap.xml` في Search Console بعد التحقق.
 عند نجاح الاتصال يُكتب في Console المتصفح `video connected via relay` إذا مرّ عبر TURN.

@@ -1,9 +1,13 @@
+const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
 
-const PORT = process.env.PORT || 3000;
+const env = process.env;
+const PORT = env.PORT || 3000;
+// Public address of the site, used in SEO tags, robots.txt and sitemap.xml.
+const SITE_URL = (env.SITE_URL || 'https://sudfa.onrender.com').replace(/\/+$/, '');
 const MAX_CHAT_LENGTH = 500;
 const REMATCH_COOLDOWN_MS = 6000; // don't instantly re-pair the same two people
 const REPORTS_TO_BAN = 3; // distinct reporters needed
@@ -14,7 +18,37 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e5 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+// ── SEO ──────────────────────────────────────────────
+// Accepts either the bare token or the whole <meta> tag Search Console shows.
+function googleVerificationTag() {
+  const raw = env.GOOGLE_SITE_VERIFICATION;
+  if (!raw) return '';
+  const match = raw.match(/content="([^"]+)"/);
+  const token = (match ? match[1] : raw).replace(/[^\w-]/g, '');
+  return `<meta name="google-site-verification" content="${token}">`;
+}
+
+const indexHtml = fs
+  .readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
+  .replaceAll('%SITE_URL%', SITE_URL)
+  .replace('<!--GOOGLE_SITE_VERIFICATION-->', googleVerificationTag());
+
+app.get(['/', '/index.html'], (_req, res) => res.type('html').send(indexHtml));
+
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').send(`User-agent: *\nAllow: /\n\nSitemap: ${SITE_URL}/sitemap.xml\n`);
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  res.type('application/xml').send(
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+      `  <url><loc>${SITE_URL}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>\n` +
+      '</urlset>\n',
+  );
+});
+
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 // ── ICE servers ──────────────────────────────────────
 // STUN alone only works when neither side is behind a strict NAT. Users on mobile
@@ -27,7 +61,6 @@ const ICE_TTL_S = 24 * 60 * 60;
 const ICE_CACHE_MS = 60 * 60 * 1000;
 let iceCache = { servers: null, expires: 0 };
 
-const env = process.env;
 const TURN_PROVIDER =
   (env.CF_TURN_KEY_ID && env.CF_TURN_API_TOKEN && 'cloudflare') ||
   (env.METERED_DOMAIN && env.METERED_API_KEY && 'metered') ||
