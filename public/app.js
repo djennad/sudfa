@@ -31,7 +31,10 @@
 
   const CONSENT_KEY = 'sudfa:consent';
 
-  // idle → searching → connecting (matched, video not yet flowing) → connected
+  // idle → searching → connecting (matched, video not yet flowing) → connected,
+  // or → failed (matched, but the network blocked the video; text chat still works)
+  const PAIRED_PHASES = ['connecting', 'connected', 'failed'];
+  const VIDEO_TIMEOUT_MS = 20000;
   let phase = 'idle';
   let banned = false;
   let localStream = null;
@@ -40,6 +43,7 @@
   let pendingCandidates = [];
   let rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
   let researchTimer = null;
+  let videoTimer = null;
   let typingTimer = null;
   let sentTyping = false;
   let lastSent = 0;
@@ -47,10 +51,12 @@
 
   const socket = io({ autoConnect: false });
 
-  fetch('/config')
+  const configReady = fetch('/config')
     .then((r) => r.json())
     .then((cfg) => { if (cfg && cfg.iceServers) rtcConfig = { iceServers: cfg.iceServers }; })
     .catch(() => {});
+
+  const isPaired = () => PAIRED_PHASES.includes(phase);
 
   // ── UI helpers ────────────────────────────────────
 
@@ -71,7 +77,7 @@
   function setPhase(next, overlayText) {
     phase = next;
     const active = phase !== 'idle';
-    const paired = phase === 'connecting' || phase === 'connected';
+    const paired = isPaired();
 
     els.nextLabel.textContent = active ? 'التالي' : 'ابدأ';
     els.escHint.hidden = !active;
@@ -87,7 +93,9 @@
     } else if (phase === 'searching') {
       setOverlay(...(overlayText || ['جاري البحث عن شخص…', 'لحظات وسنجد لك أحداً للدردشة.']), { spinner: true });
     } else if (phase === 'connecting') {
-      setOverlay('تم العثور على شخص!', 'جاري الاتصال بالفيديو…', { spinner: true });
+      setOverlay('تم العثور على شخص!', 'جاري ربط الفيديو… يمكنك الكتابة له في الدردشة.', { spinner: true });
+    } else if (phase === 'failed') {
+      setOverlay('تعذّر ربط الفيديو', 'شبكة أحدكما تمنع الاتصال المباشر. يمكنكما الدردشة كتابياً، أو اضغط «التالي».');
     } else if (phase === 'connected') {
       setOverlay('', '', { visible: false });
     }
@@ -190,6 +198,7 @@
   // ── WebRTC ────────────────────────────────────────
 
   function closePeer() {
+    clearTimeout(videoTimer);
     if (pc) {
       pc.ontrack = pc.onicecandidate = pc.onconnectionstatechange = null;
       pc.close();
@@ -197,6 +206,41 @@
     }
     pendingCandidates = [];
     els.remoteVideo.srcObject = null;
+    els.remoteVideo.muted = false;
+  }
+
+  function videoConnected() {
+    clearTimeout(videoTimer);
+    if (phase === 'connecting' || phase === 'failed') setPhase('connected');
+  }
+
+  function videoFailed() {
+    if (phase !== 'connecting') return;
+    setPhase('failed');
+    addSystem('تعذّر ربط الفيديو مع هذا الشخص. يمكنكما الدردشة كتابياً أو اضغط «التالي».');
+  }
+
+  // Logs whether the call went direct (host/srflx) or through the TURN relay.
+  async function logRoute(peer) {
+    try {
+      const stats = await peer.getStats();
+      for (const s of stats.values()) {
+        if (s.type === 'candidate-pair' && s.state === 'succeeded' && s.nominated) {
+          const local = stats.get(s.localCandidateId);
+          console.info('[sudfa] video connected via', local && local.candidateType);
+          return;
+        }
+      }
+    } catch {}
+  }
+
+  function playRemote() {
+    els.remoteVideo.play().catch(() => {
+      // Autoplay with sound was blocked: play muted and let a tap enable sound.
+      els.remoteVideo.muted = true;
+      els.remoteVideo.play().catch(() => {});
+      showToast('اضغط على الفيديو لتشغيل الصوت', 5000);
+    });
   }
 
   function createPeer() {
@@ -211,15 +255,21 @@
     peer.ontrack = (ev) => {
       if (peer !== pc) return;
       const stream = ev.streams[0] || new MediaStream([ev.track]);
-      if (els.remoteVideo.srcObject !== stream) els.remoteVideo.srcObject = stream;
+      if (els.remoteVideo.srcObject !== stream) {
+        els.remoteVideo.srcObject = stream;
+        playRemote();
+      }
     };
     peer.onconnectionstatechange = () => {
       if (peer !== pc) return;
-      if (peer.connectionState === 'failed') {
-        addSystem('تعذّر الاتصال بالفيديو مع هذا الشخص.');
-        next();
+      if (peer.connectionState === 'connected') {
+        videoConnected();
+        logRoute(peer);
+      } else if (peer.connectionState === 'failed') {
+        videoFailed();
       }
     };
+    videoTimer = setTimeout(() => { if (peer === pc) videoFailed(); }, VIDEO_TIMEOUT_MS);
     return peer;
   }
 
@@ -267,8 +317,12 @@
     }
   }
 
-  els.remoteVideo.addEventListener('playing', () => {
-    if (phase === 'connecting') setPhase('connected');
+  els.remoteVideo.addEventListener('playing', videoConnected);
+  els.remoteVideo.addEventListener('click', () => {
+    if (els.remoteVideo.muted) {
+      els.remoteVideo.muted = false;
+      els.remoteVideo.play().catch(() => {});
+    }
   });
 
   // ── Actions ───────────────────────────────────────
@@ -276,7 +330,7 @@
   async function start() {
     if (banned) return;
     els.nextBtn.disabled = true;
-    await ensureMedia();
+    await Promise.all([ensureMedia(), configReady]);
     els.nextBtn.disabled = false;
     if (!socket.connected) socket.connect();
     clearChat();
@@ -305,7 +359,7 @@
   }
 
   function report() {
-    if (phase !== 'connecting' && phase !== 'connected') return;
+    if (!isPaired()) return;
     if (!confirm('هل تريد الإبلاغ عن هذا المستخدم والانتقال لشخص آخر؟')) return;
     stopTyping();
     closePeer();
@@ -360,7 +414,7 @@
     addMessage(text, 'them');
   });
   socket.on('typing', (isTyping) => {
-    if (phase === 'connecting' || phase === 'connected') els.typing.hidden = !isTyping;
+    if (isPaired()) els.typing.hidden = !isTyping;
   });
   socket.on('banned', () => {
     banned = true;
@@ -388,7 +442,7 @@
   els.chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const text = els.chatInput.value.trim();
-    if (!text || (phase !== 'connecting' && phase !== 'connected')) return;
+    if (!text || !isPaired()) return;
     const now = Date.now();
     if (now - lastSent < 350) return;
     lastSent = now;

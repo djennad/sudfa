@@ -16,20 +16,71 @@ const io = new Server(server, { maxHttpBufferSize: 1e5 });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ICE servers are served from here so a TURN server can be added via env vars
-// without touching the client.
-app.get('/config', (_req, res) => {
-  const iceServers = [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-  ];
-  if (process.env.TURN_URL) {
-    iceServers.push({
-      urls: process.env.TURN_URL.split(','),
-      username: process.env.TURN_USERNAME,
-      credential: process.env.TURN_CREDENTIAL,
-    });
+// ── ICE servers ──────────────────────────────────────
+// STUN alone only works when neither side is behind a strict NAT. Users on mobile
+// data or many home ISPs need a TURN relay, configured through env vars:
+//   Cloudflare: CF_TURN_KEY_ID + CF_TURN_API_TOKEN
+//   Metered:    METERED_DOMAIN (e.g. myapp.metered.live) + METERED_API_KEY
+//   Any other:  TURN_URL (comma-separated) + TURN_USERNAME + TURN_CREDENTIAL
+const STUN_SERVERS = { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] };
+const ICE_TTL_S = 24 * 60 * 60;
+const ICE_CACHE_MS = 60 * 60 * 1000;
+let iceCache = { servers: null, expires: 0 };
+
+const env = process.env;
+const TURN_PROVIDER =
+  (env.CF_TURN_KEY_ID && env.CF_TURN_API_TOKEN && 'cloudflare') ||
+  (env.METERED_DOMAIN && env.METERED_API_KEY && 'metered') ||
+  (env.TURN_URL && 'custom') ||
+  null;
+
+async function fetchTurnServers() {
+  if (TURN_PROVIDER === 'cloudflare') {
+    const res = await fetch(
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${env.CF_TURN_KEY_ID}/credentials/generate-ice-servers`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${env.CF_TURN_API_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ttl: ICE_TTL_S }),
+      },
+    );
+    if (!res.ok) throw new Error(`Cloudflare TURN: HTTP ${res.status}`);
+    const { iceServers } = await res.json();
+    // Port 53 is blocked by browsers and only slows ICE gathering down.
+    return iceServers.map((s) => ({ ...s, urls: [].concat(s.urls).filter((u) => !/:53(\?|$)/.test(u)) }));
   }
-  res.json({ iceServers });
+  if (TURN_PROVIDER === 'metered') {
+    const host = env.METERED_DOMAIN.includes('.') ? env.METERED_DOMAIN : `${env.METERED_DOMAIN}.metered.live`;
+    const res = await fetch(
+      `https://${host}/api/v1/turn/credentials?apiKey=${encodeURIComponent(env.METERED_API_KEY)}`,
+    );
+    if (!res.ok) throw new Error(`Metered TURN: HTTP ${res.status}`);
+    const data = await res.json();
+    return Array.isArray(data) ? data : data.iceServers;
+  }
+  if (TURN_PROVIDER === 'custom') {
+    return [{ urls: env.TURN_URL.split(','), username: env.TURN_USERNAME, credential: env.TURN_CREDENTIAL }];
+  }
+  return [];
+}
+
+async function getIceServers() {
+  if (iceCache.servers && Date.now() < iceCache.expires) return iceCache.servers;
+  let turn = [];
+  let cacheMs = ICE_CACHE_MS;
+  try {
+    turn = await fetchTurnServers();
+  } catch (err) {
+    console.error('[turn]', err.message);
+    cacheMs = 60 * 1000; // retry the provider soon
+  }
+  iceCache = { servers: [STUN_SERVERS, ...turn], expires: Date.now() + cacheMs };
+  return iceCache.servers;
+}
+
+app.get('/config', async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ iceServers: await getIceServers() });
 });
 
 /** @type {{ socket: import('socket.io').Socket, since: number }[]} */
@@ -203,4 +254,6 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`Sudfa random video chat running on http://localhost:${PORT}`);
+  if (TURN_PROVIDER) console.log(`TURN provider: ${TURN_PROVIDER}`);
+  else console.warn('No TURN server configured — video will fail for many users on mobile data. See README.');
 });
