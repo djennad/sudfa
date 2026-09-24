@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <title>صدفة — دردشة فيديو عشوائية</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>صدفة</span>
+    </div>
+    <div class="online" title="عدد المتصلين الآن">
+      <span class="online-dot" aria-hidden="true"></span>
+      <span><b id="onlineCount">—</b> متصل الآن</span>
+    </div>
+  </header>
+
+  <main class="app">
+    <section class="stage" aria-label="الفيديو">
+      <video id="remoteVideo" class="remote-video" autoplay playsinline></video>
+
+      <div class="overlay" id="overlay">
+        <div class="spinner" id="spinner" hidden></div>
+        <p class="overlay-title" id="statusTitle">جاهز للقاء شخص جديد؟</p>
+        <p class="overlay-sub" id="statusSub">اضغط «ابدأ» وسنوصلك بشخص عشوائي خلال ثوانٍ.</p>
+      </div>
+
+      <span class="tag tag-remote">الغريب</span>
+
+      <div class="pip">
+        <video id="localVideo" autoplay playsinline muted></video>
+        <span class="tag">أنت</span>
+        <div class="pip-off" id="camOffBadge" hidden>الكاميرا متوقفة</div>
+      </div>
+    </section>
+
+    <nav class="controls" aria-label="أزرار التحكم">
+      <button class="icon-btn" id="micBtn" type="button" aria-pressed="false" title="كتم الميكروفون">
+        <svg class="icon on" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+        <svg class="icon off" viewBox="0 0 24 24"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+      </button>
+      <button class="icon-btn" id="camBtn" type="button" aria-pressed="false" title="إيقاف الكاميرا">
+        <svg class="icon on" viewBox="0 0 24 24"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+        <svg class="icon off" viewBox="0 0 24 24"><path d="M10.66 6H14a2 2 0 0 1 2 2v2.5l5.248-3.062A.5.5 0 0 1 22 7.87v8.196"/><path d="M16 16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2"/><path d="m2 2 20 20"/></svg>
+      </button>
+
+      <button class="primary-btn" id="nextBtn" type="button">
+        <svg class="icon flip" viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></svg>
+        <span id="nextLabel">ابدأ</span>
+        <kbd id="escHint" hidden>Esc</kbd>
+      </button>
+
+      <button class="icon-btn" id="stopBtn" type="button" title="إيقاف" disabled>
+        <svg class="icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+      </button>
+      <button class="icon-btn danger" id="reportBtn" type="button" title="إبلاغ عن المستخدم" disabled>
+        <svg class="icon" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
+      </button>
+    </nav>
+
+    <aside class="chat" aria-label="الدردشة النصية">
+      <div class="chat-head">
+        <span>الدردشة</span>
+        <span class="typing" id="typing" hidden>الغريب يكتب<span class="dots"><i></i><i></i><i></i></span></span>
+      </div>
+      <div class="messages" id="messages" aria-live="polite">
+        <p class="empty" id="emptyChat">ستظهر الرسائل هنا عندما تتصل بشخص.</p>
+      </div>
+      <form class="composer" id="chatForm" autocomplete="off">
+        <input id="chatInput" type="text" maxlength="500" placeholder="اكتب رسالة…" disabled>
+        <button type="submit" id="sendBtn" title="إرسال" disabled>
+          <svg class="icon flip" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+        </button>
+      </form>
+    </aside>
+  </main>
+
+  <div class="gate" id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+    <div class="gate-card">
+      <span class="brand-mark big" aria-hidden="true"></span>
+      <h1 id="gateTitle">صدفة</h1>
+      <p class="gate-lead">دردشة فيديو مع أشخاص عشوائيين من حول العالم — بضغطة زر واحدة.</p>
+      <ul class="rules">
+        <li>يجب أن يكون عمرك <b>18 سنة أو أكثر</b>.</li>
+        <li>ممنوع المحتوى الجنسي أو العنف أو التحرّش أو الإساءة.</li>
+        <li>لا تشارك معلوماتك الشخصية مع الغرباء.</li>
+        <li>استعمل زر <b>الإبلاغ</b> عند أي تصرّف مسيء — البلاغات المتكررة تؤدي إلى الحظر.</li>
+      </ul>
+      <label class="consent">
+        <input type="checkbox" id="consentBox">
+        <span>أؤكد أن عمري 18 سنة أو أكثر وأوافق على القواعد.</span>
+      </label>
+      <button class="primary-btn wide" id="enterBtn" type="button" disabled>ادخل</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
